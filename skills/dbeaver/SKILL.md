@@ -28,7 +28,7 @@ Tools are prefixed `dbeaver__`. Connections come from the local DBeaver workspac
 - Prefer `execute_query` for reads. Writes go through `write_query` or `run_script`.
 - Two or more `SELECT`s: one `execute_query` is enough — do not expect an empty last result.
 - After a restore or explicit ids, call `inspect_sequences` before inserting.
-- Live DBs: backup or confirm before mutating.
+- Live DBs: backup or confirm before mutating. First run and the first write of a session show BACKUP FIRST YOUR DATABASE.
 - `maxRows` defaults to 200 (cap 2000). `truncated: true` means more rows exist.
 - Override workspace with `DBEAVER_WORKSPACE` if DBeaver is not in the default path.
 - Details: repo `HOWTO.md`.

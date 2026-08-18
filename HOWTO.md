@@ -99,6 +99,29 @@ write_query
   query: SELECT setval('pages_id_seq', (SELECT MAX(id) FROM pages), true)
 ```
 
+## Backup banner
+
+On first run the server prints this to **stderr** (stdout is the MCP protocol) and includes it in the first `list_connections` / write result:
+
+```
+BACKUP FIRST YOUR DATABASE
+Writes go last.  Dump goes first.
+```
+
+After that, a one-line reminder still goes to stderr on every start, and the full art shows once more on the **first write of each process**.
+
+The first-run flag is `~/.dbeaver-mcp/backup-seen`. For tests or a fresh demo:
+
+```bash
+# Windows
+set DBEAVER_MCP_STATE=%TEMP%\dbeaver-mcp-demo
+
+# macOS / Linux
+export DBEAVER_MCP_STATE=/tmp/dbeaver-mcp-demo
+```
+
+Delete `backup-seen` in that folder to see the art again.
+
 ## Live databases
 
 - Backup or get a clear “yes” before `write_query` / `run_script`.

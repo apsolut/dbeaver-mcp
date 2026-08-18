@@ -5,9 +5,30 @@ import { z } from 'zod'
 import { closeTunnels } from './tunnel.js'
 import { findConnection, loadConnections, publicConnection } from './dbeaver.js'
 import { inspectSequences, isWriteSql, runQuery, runScript } from './query.js'
+import {
+  backupBannerText,
+  backupNotice,
+  isFirstRun,
+  markBackupSeen,
+  printStartupBanner,
+} from './banner.js'
 
-function json(data) {
-  return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+function json(data, preamble) {
+  const parts = []
+  if (preamble) parts.push({ type: 'text', text: preamble })
+  parts.push({ type: 'text', text: JSON.stringify(data, null, 2) })
+  return { content: parts }
+}
+
+let wroteThisProcess = false
+
+function consumeBackupBanner({ full = false } = {}) {
+  const first = isFirstRun()
+  const show = first || !wroteThisProcess
+  if (first) markBackupSeen()
+  wroteThisProcess = true
+  if (!show) return undefined
+  return backupBannerText({ full: full || first })
 }
 
 function fail(message) {
@@ -25,13 +46,21 @@ function resolve(nameOrId) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: 'dbeaver-mcp', version: '1.3.0' })
+  const server = new McpServer({ name: 'dbeaver-mcp', version: '1.4.0' })
 
   server.tool(
     'list_connections',
     'List DBeaver Community connections (names, hosts, SSH hop). Passwords are never returned.',
     {},
-    async () => json(loadConnections().map(publicConnection))
+    async () => {
+      const first = isFirstRun()
+      const connections = loadConnections().map(publicConnection)
+      if (first) markBackupSeen()
+      return json(
+        first ? { notice: backupNotice({ full: true }), connections } : connections,
+        first ? backupBannerText({ full: true }) : undefined
+      )
+    }
   )
 
   server.tool(
@@ -85,7 +114,8 @@ function createServer() {
       try {
         const conn = resolve(name)
         const result = await runQuery(conn, query, { maxRows: 50, allowWrites: true })
-        return json({ connection: conn.name, ...result })
+        const banner = consumeBackupBanner({ full: true })
+        return json({ connection: conn.name, ...result, notice: banner ? backupNotice({ full: true }) : undefined }, banner)
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err))
       }
@@ -112,7 +142,8 @@ function createServer() {
         if (list.length === 0) return fail('Provide statements[] and/or script')
         const conn = resolve(name)
         const result = await runScript(conn, list, { maxRows: maxRows ?? 200, transaction })
-        return json({ connection: conn.name, ...result })
+        const banner = consumeBackupBanner({ full: true })
+        return json({ connection: conn.name, ...result, notice: banner ? backupNotice({ full: true }) : undefined }, banner)
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err))
       }
@@ -217,6 +248,7 @@ function createServer() {
 }
 
 async function runCli(argv) {
+  printStartupBanner()
   const [cmd, ...rest] = argv
   if (!cmd || cmd === 'list') {
     console.log(JSON.stringify(loadConnections().map(publicConnection), null, 2))
@@ -274,6 +306,7 @@ async function main() {
     return
   }
 
+  printStartupBanner()
   const server = createServer()
   const transport = new StdioServerTransport()
   await server.connect(transport)

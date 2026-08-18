@@ -27,6 +27,7 @@ Or run `node scripts/install-hosts.mjs` from this directory. It writes those fil
 
 ## Rules
 
+- On first run and before the first write, surface the BACKUP FIRST YOUR DATABASE banner and dump before mutating.
 - Never print database or SSH passwords.
 - Prefer `dbeaver__execute_query` for reads. Several SELECTs in one call return every result set.
 - Confirm before `dbeaver__write_query` or `dbeaver__run_script` on live data.

@@ -53,6 +53,8 @@ After restart:
 
 You should see tools named `dbeaver__list_connections`, `dbeaver__execute_query`, `dbeaver__run_script`, `dbeaver__inspect_sequences`.
 
+The first start (and the first write of a session) prints a **BACKUP FIRST YOUR DATABASE** banner. Dump before `write_query` / `run_script`. The marker lives in `~/.dbeaver-mcp/backup-seen` (override with `DBEAVER_MCP_STATE`).
+
 Then:
 
 > test the connection named PSN LIVE  

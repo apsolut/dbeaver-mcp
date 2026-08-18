@@ -1,6 +1,6 @@
 {
   "name": "dbeaver-mcp",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": false,
   "type": "module",
   "description": "MCP plugin: query DBeaver Community connections, including SSH-tunneled Postgres. Works with Grok, Claude Code, Codex, and Agy.",
