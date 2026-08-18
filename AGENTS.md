@@ -28,5 +28,8 @@ Or run `node scripts/install-hosts.mjs` from this directory. It writes those fil
 ## Rules
 
 - Never print database or SSH passwords.
-- Prefer `dbeaver__execute_query` for reads.
-- Confirm before `dbeaver__write_query` on live data.
+- Prefer `dbeaver__execute_query` for reads. Several SELECTs in one call return every result set.
+- Confirm before `dbeaver__write_query` or `dbeaver__run_script` on live data.
+- `SELECT setval` / `nextval` are writes. Use `write_query`.
+- After a dump or manual ids, `dbeaver__inspect_sequences` before inserting into serial tables.
+- Full tool notes: `HOWTO.md`.

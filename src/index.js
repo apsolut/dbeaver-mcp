@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { closeTunnels } from './tunnel.js'
 import { findConnection, loadConnections, publicConnection } from './dbeaver.js'
-import { isWriteSql, runQuery } from './query.js'
+import { inspectSequences, isWriteSql, runQuery, runScript } from './query.js'
 
 function json(data) {
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
@@ -25,7 +25,7 @@ function resolve(nameOrId) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: 'dbeaver-mcp', version: '1.2.0' })
+  const server = new McpServer({ name: 'dbeaver-mcp', version: '1.3.0' })
 
   server.tool(
     'list_connections',
@@ -54,19 +54,19 @@ function createServer() {
 
   server.tool(
     'execute_query',
-    'Run a read-only SQL query on a DBeaver connection. SSH tunnels are opened automatically.',
+    'Run read-only SQL. Multiple SELECTs return every result set (not only the last). SSH tunnels open automatically.',
     {
-      name: z.string().describe('Connection name or id'),
-      query: z.string().describe('SELECT / WITH / EXPLAIN / SHOW only'),
-      maxRows: z.number().int().min(1).max(2000).optional().describe('Row cap (default 200)'),
+      name: z.string().describe('Connection name or id, e.g. "PSN LIVE"'),
+      query: z.string().describe('SELECT / WITH / EXPLAIN / SHOW. Multiple statements allowed.'),
+      maxRows: z.number().int().min(1).max(2000).optional().describe('Row cap per statement (default 200)'),
     },
     async ({ name, query, maxRows }) => {
       try {
         if (isWriteSql(query)) {
-          return fail('Refusing write SQL on execute_query. Use write_query.')
+          return fail('Refusing write SQL on execute_query. Use write_query or run_script.')
         }
         const conn = resolve(name)
-        const result = await runQuery(conn, query, { maxRows: maxRows ?? 200 })
+        const result = await runQuery(conn, query, { maxRows: maxRows ?? 200, allowWrites: false })
         return json({ connection: conn.name, ...result })
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err))
@@ -76,15 +76,61 @@ function createServer() {
 
   server.tool(
     'write_query',
-    'Run INSERT/UPDATE/DELETE/DDL on a DBeaver connection. Prefer execute_query for reads.',
+    'Run INSERT/UPDATE/DELETE/DDL. Several statements in one string run on one connection; more than one write is wrapped in a transaction.',
     {
       name: z.string().describe('Connection name or id'),
-      query: z.string().describe('Mutating SQL'),
+      query: z.string().describe('Mutating SQL (one or more statements)'),
     },
     async ({ name, query }) => {
       try {
         const conn = resolve(name)
-        const result = await runQuery(conn, query, { maxRows: 50 })
+        const result = await runQuery(conn, query, { maxRows: 50, allowWrites: true })
+        return json({ connection: conn.name, ...result })
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err))
+      }
+    }
+  )
+
+  server.tool(
+    'run_script',
+    'Run several SQL statements on one connection. Defaults to a transaction when any statement writes. Use for insert-region-then-update-rows workflows.',
+    {
+      name: z.string().describe('Connection name or id'),
+      statements: z.array(z.string().min(1)).min(1).max(50).optional().describe('SQL statements in order'),
+      script: z.string().optional().describe('SQL script; split on top-level semicolons'),
+      transaction: z
+        .boolean()
+        .optional()
+        .describe('Force a transaction (default: on when any statement writes and there are 2+)'),
+      maxRows: z.number().int().min(1).max(2000).optional().describe('Row cap per statement (default 200)'),
+    },
+    async ({ name, statements, script, transaction, maxRows }) => {
+      try {
+        const list = [...(statements || [])]
+        if (script) list.push(script)
+        if (list.length === 0) return fail('Provide statements[] and/or script')
+        const conn = resolve(name)
+        const result = await runScript(conn, list, { maxRows: maxRows ?? 200, transaction })
+        return json({ connection: conn.name, ...result })
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err))
+      }
+    }
+  )
+
+  server.tool(
+    'inspect_sequences',
+    'Compare serial/identity sequences to MAX(column). needs_reset is true when the table is ahead of the sequence (typical after a dump or manual INSERT).',
+    {
+      name: z.string().describe('Connection name or id'),
+      schema: z.string().optional().describe('Schema (default: connection schema or public)'),
+      table: z.string().optional().describe('Only this table'),
+    },
+    async ({ name, schema, table }) => {
+      try {
+        const conn = resolve(name)
+        const result = await inspectSequences(conn, { schema, table })
         return json({ connection: conn.name, ...result })
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err))
@@ -200,7 +246,20 @@ async function runCli(argv) {
     console.log(JSON.stringify({ connection: conn.name, ...result }, null, 2))
     return
   }
-  console.error('Usage: dbeaver-mcp --cli [list|test <name>|query <name> <sql>]')
+  if (cmd === 'sequences') {
+    const name = rest[0]
+    const schema = rest[1]
+    const table = rest[2]
+    if (!name) {
+      console.error('Usage: dbeaver-mcp --cli sequences "<connection>" [schema] [table]')
+      process.exit(1)
+    }
+    const conn = resolve(name)
+    const result = await inspectSequences(conn, { schema, table })
+    console.log(JSON.stringify({ connection: conn.name, ...result }, null, 2))
+    return
+  }
+  console.error('Usage: dbeaver-mcp --cli [list|test <name>|query <name> <sql>|sequences <name> [schema] [table]]')
   process.exit(1)
 }
 
