@@ -1,0 +1,28 @@
+{
+  "name": "dbeaver-mcp",
+  "version": "1.2.0",
+  "private": false,
+  "type": "module",
+  "description": "MCP plugin: query DBeaver Community connections, including SSH-tunneled Postgres. Works with Grok, Claude Code, Codex, and Agy.",
+  "bin": {
+    "dbeaver-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "cli": "node src/index.js --cli",
+    "doctor": "node scripts/doctor.mjs",
+    "setup": "npm install && node scripts/install-hosts.mjs",
+    "install-hosts": "node scripts/install-hosts.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "keywords": ["dbeaver", "postgres", "ssh", "mcp", "grok", "claude", "codex", "antigravity"],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "pg": "^8.16.0",
+    "ssh2": "^1.16.0",
+    "zod": "^3.24.2"
+  }
+}

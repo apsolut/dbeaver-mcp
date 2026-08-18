@@ -1,0 +1,15 @@
+{
+  "name": "dbeaver-mcp",
+  "description": "DBeaver Community MCP (SSH tunnels)",
+  "owner": { "name": "apsolut" },
+  "plugins": [
+    {
+      "name": "dbeaver-mcp",
+      "description": "Query DBeaver Community connections, including SSH-tunneled Postgres",
+      "category": "database",
+      "source": { "type": "local", "path": "." },
+      "version": "1.2.0",
+      "tags": ["dbeaver", "postgres", "ssh", "mcp"]
+    }
+  ]
+}
