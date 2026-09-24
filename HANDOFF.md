@@ -1,0 +1,108 @@
+# HANDOFF — dbeaver-mcp, 2026-09-24
+
+State at handoff: **v1.6.0 on branch `release/1.6.0`**, working tree clean, 67 tests passing.
+Nothing is published and there is no git remote yet.
+
+For *what to do next*, read **[TODO.md](./TODO.md)** — it holds the blockers and the open
+decisions. This file is context: what was done, what was actually verified, and what to be
+careful about.
+
+---
+
+## Where things stand
+
+```
+7cb8e9e  chore(release): 1.6.0 packaging, CI matrix and repo scaffolding
+831bf06  docs: document the new security model, tools and access policy
+9623b5f  feat(security): verify SSH host keys, enforce read-only, add access policy
+98ad6cb  feat: first-run BACKUP FIRST YOUR DATABASE banner   <-- main is still here
+```
+
+`main` has **not** moved. To fast-forward it once you are happy:
+
+```bash
+git checkout main && git merge --ff-only release/1.6.0
+```
+
+Two releases landed in `9623b5f` together. That was deliberate: both passes edited the same
+functions in `query.js`, `dbeaver.js`, `tunnel.js` and `index.js`, so splitting them would have
+meant inventing a history that never existed. The commit body explains both.
+
+## What was verified, and what was not
+
+Be precise about this — the README makes a public claim about it.
+
+**Verified end-to-end on Windows 11 / Node 22 against live Postgres 15, through a real SSH tunnel:**
+
+- Host key verification against the real bastion, strict mode, rejecting an unknown host
+- `SHOW transaction_read_only` returning `on` inside `execute_query` — the read-only guarantee is
+  the engine's, not a regex's
+- `explain_query`, `fix_sequences` (dry run found two genuinely broken sequences on the dev DB)
+- `trust_ssh_host` full flow: probe → fingerprint → confirmation → refusal on a wrong fingerprint
+- Connection allow list, the read/write split, and the destructive-SQL guard firing before any
+  connection is opened
+- The installer in a sandboxed `HOME`: config backup, malformed-config refusal, and refusal to
+  delete a real directory where a link was expected
+
+**Not verified, at all:**
+
+- **macOS and Linux.** Implemented and unit-tested; nobody has run a real query on either. The
+  installer's `mklink`-vs-`symlink` branch has only ever run on Windows.
+- **CI.** `.github/workflows/ci.yml` exists and covers all three OSes, but has **never executed** —
+  there is no remote to run it on. Do not mistake a committed workflow for a passing one.
+- Connection pooling and stateful transactions — deliberately not built, see TODO.md §4.
+
+## Things that will bite you
+
+1. **The npm name `dbeaver-mcp` is taken** by an unrelated v3.0.0. `npm publish` returns 403.
+   Decision D1 in TODO.md; the recommendation is `@apsolut/dbeaver-mcp`.
+2. **`README.md` still says `git clone <this-repo>`** — a placeholder, sitting above a section
+   inviting PRs. Fix it the moment the repo exists.
+3. **Renaming the plugin needs a migration step.** `scripts/install-hosts.mjs:211` dedupes on the
+   old name; change the name without adding the old one to that list and a re-run appends a
+   *second* marketplace entry. The old-named links in `~/.codex/plugins/`, `~/.grok/plugins/` and
+   `~/.gemini/config/plugins/` also need removing, or every host shows the plugin twice.
+   `linkDir` will not do this — it only manages the path it is handed.
+4. **Three breaking changes** from 1.4 will look like bugs to an existing user: tunnels to unknown
+   hosts now fail, `verify-ca`/`verify-full` connections may now legitimately fail, and writes need
+   an exact connection name. All three are in the CHANGELOG and in README's "Upgrading from 1.4".
+
+## The local vault
+
+`.apsolut/` is a davinci-profile working notebook. It is **gitignored, never committed, and never
+has been** — confirmed against full history. A `pre-commit` hook in `.git/hooks/` blocks it from
+being staged even via `git add -f`.
+
+It is local-only and therefore **not backed up by git**. Two things in it matter:
+
+- `04-library/001-competitive-analysis.md` — the full analysis of `omnisql-mcp` and
+  `FelipeFlohr/dbeaver-mcp` with file-and-line evidence. This is the reasoning behind the
+  positioning and behind several TODO decisions. It exists nowhere else.
+- `07-files/` — pinned checkouts of both competitors. Delete once the analysis is settled;
+  the manifest already flags them.
+
+The hook does not travel with a clone (`.git/hooks/` is not cloned). If someone else picks this
+up, that protection does not come with it.
+
+## One loose end outside the repo
+
+`~/.grok/mcp/dbeaver-ssh/` is the pre-rewrite plugin directory. Its registrations have been
+removed, but it still contains `dump-psn-live.mjs`, which never made it into this repo. Rescue it
+or accept losing it before deleting that folder.
+
+## Quick orientation
+
+```bash
+npm test          # 67 tests, no database needed, should pass anywhere
+npm run doctor    # what this machine looks like: workspace, connections, SSH policy
+npm run cli -- list
+```
+
+| File | What it is |
+|------|-----------|
+| `src/knownhosts.js` | OpenSSH known_hosts parsing and the host-key decision |
+| `src/policy.js` | Access policy and destructive-SQL detection |
+| `src/query.js` | Connection setup, TLS, read-only transactions, result shaping |
+| `src/dbeaver.js` | Workspace discovery, connection parsing, name resolution |
+| `PLAN.md` | The twelve-item security audit and its implementation log |
+| `TODO.md` | Blockers and open decisions |
