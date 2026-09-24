@@ -6,7 +6,19 @@
  *   node scripts/install-hosts.mjs
  *   node scripts/install-hosts.mjs --hosts=claude,codex
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { execFileSync, execSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,23 +58,84 @@ function readJson(path, fallback) {
   if (!existsSync(path)) return fallback
   const raw = readFileSync(path, 'utf8').trim()
   if (!raw) return fallback
-  return JSON.parse(raw)
+  try {
+    return JSON.parse(raw)
+  } catch (err) {
+    // Never rewrite a config we could not understand — that would wipe every
+    // other MCP server the user has configured.
+    throw new Error(
+      `${path} is not valid JSON (${err.message}). Fix or move that file, then re-run. Nothing was changed.`
+    )
+  }
 }
 
-function writeJson(path, data) {
+/** Keep one backup, then swap the new file in atomically. */
+function backupOnce(path) {
+  if (!existsSync(path)) return null
+  const bak = `${path}.dbeaver-mcp.bak`
+  try {
+    copyFileSync(path, bak)
+    return bak
+  } catch {
+    return null
+  }
+}
+
+function writeAtomic(path, text) {
   ensureDir(dirname(path))
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
-}
-
-function linkDir(dest, src) {
-  ensureDir(dirname(dest))
-  if (existsSync(dest)) {
+  const bak = backupOnce(path)
+  const tmp = `${path}.dbeaver-mcp.${process.pid}.tmp`
+  writeFileSync(tmp, text, 'utf8')
+  try {
+    renameSync(tmp, path)
+  } catch (err) {
     try {
-      rmSync(dest, { recursive: true, force: true })
+      unlinkSync(tmp)
     } catch {
       /* ignore */
     }
+    throw err
   }
+  return bak
+}
+
+function writeJson(path, data) {
+  return writeAtomic(path, `${JSON.stringify(data, null, 2)}\n`)
+}
+
+/**
+ * Replace `dest` with a link to `src`.
+ * Only ever removes a link. A real directory there belongs to the user — a
+ * recursive delete of an unknown directory in $HOME is not an acceptable
+ * install step.
+ */
+function linkDir(dest, src) {
+  ensureDir(dirname(dest))
+  let stat = null
+  try {
+    stat = lstatSync(dest)
+  } catch {
+    stat = null
+  }
+
+  if (stat) {
+    // Node reports Windows junctions as symbolic links.
+    if (!stat.isSymbolicLink()) {
+      throw new Error(
+        `${dest} already exists and is a real ${stat.isDirectory() ? 'directory' : 'file'}, not a link. ` +
+          'Refusing to delete it — move it aside and re-run.'
+      )
+    }
+    let target = ''
+    try {
+      target = readlinkSync(dest)
+    } catch {
+      /* ignore */
+    }
+    if (target && target.replace(/[\\/]+$/, '') === src.replace(/[\\/]+$/, '')) return 'already linked'
+    rmSync(dest, { recursive: true, force: true })
+  }
+
   if (win) {
     try {
       execSync(`cmd /c mklink /J "${dest}" "${src}"`, { stdio: 'pipe' })
@@ -90,8 +163,8 @@ function upsertClaudeJson() {
   const data = readJson(path, {})
   data.mcpServers = data.mcpServers || {}
   data.mcpServers.dbeaver = stdioServer
-  writeJson(path, data)
-  log(`Claude Code  ${path}`)
+  const bak = writeJson(path, data)
+  log(`Claude Code  ${path}${bak ? `  (backup: ${bak})` : ''}`)
 }
 
 function upsertCodexToml() {
@@ -109,16 +182,16 @@ tool_timeout_sec = 90
   } else {
     text = `${text.trimEnd()}\n\n${block}`
   }
-  writeFileSync(path, text.endsWith('\n') ? text : `${text}\n`, 'utf8')
-  log(`Codex        ${path}`)
+  const bak = writeAtomic(path, text.endsWith('\n') ? text : `${text}\n`)
+  log(`Codex        ${path}${bak ? `  (backup: ${bak})` : ''}`)
 }
 
 function upsertAgyMcp(path) {
   const data = readJson(path, { mcpServers: {} })
   if (!data.mcpServers || typeof data.mcpServers !== 'object') data.mcpServers = {}
   data.mcpServers.dbeaver = { command: node, args: [entry], env: {} }
-  writeJson(path, data)
-  log(`Agy          ${path}`)
+  const bak = writeJson(path, data)
+  log(`Agy          ${path}${bak ? `  (backup: ${bak})` : ''}`)
 }
 
 function upsertAgentsMarketplace() {
@@ -162,17 +235,28 @@ function tryGrokPlugin() {
 
 if (!existsSync(entry)) throw new Error(`Missing server entry: ${entry}`)
 
-log(`plugin root  ${root}`)
-if (want('claude')) upsertClaudeJson()
-if (want('codex')) upsertCodexToml()
-if (want('agy')) {
-  upsertAgyMcp(join(home, '.gemini', 'config', 'mcp_config.json'))
-  upsertAgyMcp(join(home, '.gemini', 'antigravity', 'mcp_config.json'))
-  upsertAgyMcp(join(home, '.gemini', 'antigravity-ide', 'mcp_config.json'))
-  upsertAgyMcp(join(home, '.gemini', 'antigravity-cli', 'mcp_config.json'))
+let failures = 0
+
+/** One broken host config must not stop the others from being written. */
+function step(label, fn) {
+  try {
+    fn()
+  } catch (err) {
+    failures++
+    log(`${label} skipped: ${err instanceof Error ? err.message : err}`)
+  }
 }
-if (want('codex') || want('agy')) upsertAgentsMarketplace()
-if (want('grok')) tryGrokPlugin()
+
+log(`plugin root  ${root}`)
+if (want('claude')) step('Claude Code ', upsertClaudeJson)
+if (want('codex')) step('Codex       ', upsertCodexToml)
+if (want('agy')) {
+  for (const dir of ['config', 'antigravity', 'antigravity-ide', 'antigravity-cli']) {
+    step('Agy         ', () => upsertAgyMcp(join(home, '.gemini', dir, 'mcp_config.json')))
+  }
+}
+if (want('codex') || want('agy')) step('Marketplace ', upsertAgentsMarketplace)
+if (want('grok')) step('Grok        ', tryGrokPlugin)
 
 const links = []
 if (want('agy')) links.push(join(home, '.gemini', 'config', 'plugins', 'dbeaver-mcp'))
@@ -183,10 +267,12 @@ for (const dest of links) {
   try {
     log(`link         ${dest}  (${linkDir(dest, root)})`)
   } catch (err) {
+    failures++
     log(`link failed  ${dest}  ${err instanceof Error ? err.message : err}`)
   }
 }
 
 log('')
+if (failures) log(`${failures} step(s) were skipped — see the messages above.`)
 log('Next: restart each agent. Then ask: list DBeaver connections')
 log('Smoke test: npm run doctor')
