@@ -10,10 +10,14 @@ How to use the tools once the plugin is installed. For clone / setup / first ask
 | One or more `SELECT`s | `execute_query` |
 | One `INSERT` / `UPDATE` / `DDL` | `write_query` |
 | Several writes that must succeed together | `run_script` with `transaction: true` (default when anything writes) |
-| “Why did INSERT fail with duplicate key?” | `inspect_sequences` |
+| “Why did INSERT fail with duplicate key?” | `inspect_sequences`, then `fix_sequences` |
+| Repair every stuck sequence at once | `fix_sequences` (dry run), then `apply: true` |
+| “Why is this query slow?” | `explain_query` |
+| A tunnel fails with “Unknown SSH host key” | `trust_ssh_host` |
 | Columns of a table | `describe_table` |
 
-`name` is the DBeaver connection name, id, or a unique substring.
+`name` is the DBeaver connection name or id. Reads also accept a **unique** substring; an ambiguous
+one is rejected rather than guessed. `write_query` and `run_script` require the exact name or id.
 
 ## Reads: every result set
 
@@ -91,13 +95,57 @@ Each row:
 | `max_value` | `MAX(column)` on that table |
 | `needs_reset` | `true` when the table is ahead of the sequence |
 
-Fix a stuck sequence (this is a **write**):
+Fix every stuck sequence at once. Dry run first — it reports exactly what it would do and changes
+nothing:
+
+```
+fix_sequences
+  name: PSN LIVE
+```
+
+Then apply. This is a **write**, so it needs the exact connection name and runs every `setval` in
+one transaction:
+
+```
+fix_sequences
+  name: PSN LIVE
+  apply: true
+```
+
+Or do a single one by hand:
 
 ```
 write_query
   name: PSN LIVE
   query: SELECT setval('pages_id_seq', (SELECT MAX(id) FROM pages), true)
 ```
+
+## Destructive SQL needs `confirm`
+
+`write_query` and `run_script` refuse `DROP`, `TRUNCATE`, `ALTER SYSTEM`, and `DELETE` / `UPDATE`
+without a `WHERE` unless you pass `confirm: true`.
+
+The check runs per statement on the parsed batch, with string literals stripped first — so neither
+`SELECT 1; DELETE FROM users` nor `UPDATE posts SET body = 'go where you like'` gets through on a
+technicality.
+
+It is a confirmation rather than a hard refusal on purpose: a flat block just teaches an agent to
+rephrase the query until it slips past, which is worse than making it say out loud what it is about
+to do.
+
+## Restricting access
+
+Set these in the MCP host config, not in the conversation — then the limits hold regardless of what
+the agent decides to try.
+
+| Variable | Effect |
+|----------|--------|
+| `DBEAVER_MCP_READ_ONLY=true` | `write_query`, `run_script`, `fix_sequences` are never registered |
+| `DBEAVER_MCP_ALLOWED_CONNECTIONS` | Only these are reachable — others cannot even be named |
+| `DBEAVER_MCP_WRITABLE_CONNECTIONS` | Narrower list that accepts writes (read prod, write dev) |
+| `DBEAVER_MCP_DISABLED_TOOLS` | Remove named tools from the surface |
+
+Names match connection name or id, case-insensitively, with `*` and `?` wildcards.
 
 ## Backup banner
 
@@ -159,10 +207,17 @@ Covers statement splitting and write detection. No database required.
 
 | Symptom | What to try |
 |---------|-------------|
-| Unknown connection | `list_connections`. Name is case-sensitive except for unique substring match. |
-| No database password | Open the connection once in DBeaver and save the password. `hasPassword` must be true. |
-| Workspace not found | `npm run doctor`. Set `DBEAVER_WORKSPACE` to the folder that contains `General/.dbeaver/data-sources.json`. |
-| SSH timeout / auth fail | Test the same connection inside DBeaver first. This plugin does not use your SSH agent unless DBeaver stored that setup. |
+| Unknown connection | `list_connections`. Matching is case-insensitive; substrings work for reads only. |
+| "is ambiguous — it matches N connections" | Use the full name or the id. This is deliberate: a partial match must never pick a database for you. |
+| "Writes require an exact name or id" | Pass the exact `name` or `id` from `list_connections`. |
+| No database password | Open the connection once in DBeaver and save the password. `hasPassword` must be true. If `list_connections` returns a `credentials-unreadable` warning, a DBeaver master password is blocking the local store. |
+| Workspace not found | `npm run doctor`. Set `DBEAVER_WORKSPACE` to the folder that contains `General/.dbeaver/data-sources.json`. Snap and Flatpak installs are auto-detected. |
+| "Unknown SSH host key" | `ssh-keyscan -p <port> <host> >> ~/.ssh/known_hosts`, or set `DBEAVER_MCP_SSH_HOST_KEY_POLICY=tofu`. |
+| "SSH host key mismatch" | The bastion's key changed. Verify out-of-band, then `ssh-keygen -R <host>`. Do not bypass this. |
+| SSH timeout / auth fail | Test the same connection inside DBeaver first. Agent auth needs `SSH_AUTH_SOCK` in the MCP server's environment, which desktop hosts usually do not provide. |
+| Query hangs then errors | The 30s `statement_timeout` fired. Pass `timeoutMs`, or raise `DBEAVER_MCP_STATEMENT_TIMEOUT_MS`. |
+| `truncatedBytes: true` in a result | The payload cap kicked in. Narrow the `SELECT` or raise `DBEAVER_MCP_MAX_BYTES`. |
+| Connection has `supported: false` | That driver is not Postgres. This plugin speaks the Postgres wire protocol only. |
 | `execute_query` refuses `SELECT setval` | That is a write. Use `write_query`. |
 | Empty result for two SELECTs (old plugin) | Upgrade to 1.3+. You should now get `results[]`. |
 | `duplicate key` on INSERT | `inspect_sequences` then `setval`. |
