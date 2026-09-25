@@ -46,8 +46,12 @@ npm run setup
 
 `setup` installs dependencies and points every agent it can find at **this checkout**.
 
-This is distributed by clone only — it is **not on npm**. The npm package `dbeaver-mcp` is an
-unrelated project, so `npx dbeaver-mcp` will get you someone else's server.
+On npm the package is **`@apsolut/dbeaver-mcp`** — the scope matters. The unscoped `dbeaver-mcp`
+is an unrelated project, so `npx dbeaver-mcp` gets you someone else's server.
+
+Cloning is still the recommended route, because `npm run setup` is what registers the plugin with
+every agent on the machine. Note that Windows is the only platform where a real query has been
+verified end-to-end; see the table above.
 
 Restart Grok / Claude / Codex / Agy.
 
