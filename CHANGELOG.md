@@ -5,6 +5,67 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-26
+
+### Security
+
+- **Fixed: the read-only guarantee could be ended from inside the SQL.** Reads run in
+  `BEGIN TRANSACTION READ ONLY`, but transaction-control statements were not recognised as writes,
+  so `COMMIT; SELECT writes_via_volatile_function()` committed the read-only transaction and ran the
+  rest of the batch unprotected. `SET TRANSACTION READ WRITE` did the same, since Postgres accepts
+  it before a transaction's first query. Transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, `END`,
+  `ABORT`, `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`, `SET TRANSACTION`, `DISCARD`) is now
+  refused on every path, reads and writes alike — a mid-batch `COMMIT` also quietly broke
+  `run_script`'s single-transaction promise.
+- **Fixed: statements could disarm the safety timeouts and change identity.**
+  `SET statement_timeout = 0`, `RESET ALL`, `SET ROLE`, `SET SESSION AUTHORIZATION` and
+  `SET session_replication_role` are refused for the same reason.
+- **Credential stores and server-side file readers are blocked.** `pg_authid`, `pg_shadow`,
+  `pg_user_mappings`, `pg_read_file`, `pg_read_binary_file`, `pg_stat_file` and the `pg_ls_*`
+  family. These are plain reads that a read-only transaction permits, so on a superuser connection
+  an agent could simply ask for the password verifiers. Opt back in with
+  `DBEAVER_MCP_ALLOW_SENSITIVE_READS=true`. `explain_query` is covered too, since
+  `analyze: true` executes.
+- **Fixed: a quoted identifier could defeat the unbounded-write check.** Literal stripping ignored
+  double-quoted identifiers, so `UPDATE t SET "where" = 1` contained the word `where` and was not
+  flagged as rewriting every row.
+- **Widened destructive-statement detection.** `DROP` now covers sequences, functions, procedures,
+  routines, aggregates, triggers, types, domains, extensions, policies, publications,
+  subscriptions, foreign tables, servers, rules, operators, casts and `DROP OWNED`. Previously only
+  tables, schemas, roles, users, indexes and views required confirmation — `DROP SEQUENCE` and
+  `DROP FUNCTION` went through unconfirmed. `ALTER TABLE … DROP COLUMN` / `DROP CONSTRAINT` is now
+  flagged, and `CASCADE` is called out.
+
+### Fixed
+
+- **Sequence values lost precision past 2^53.** `inspectSequences` and `fix_sequences` ran bigint
+  values through `Number()`, so a sequence on a large-id table could be reported as fine when it was
+  behind, and `setval` could be issued with a *rounded* target — reintroducing exactly the
+  duplicate-key failures the tool exists to fix. Both now compare and emit exact integers.
+- **`fix_sequences` did not escape the identifiers it interpolated.** The generated
+  `setval('schema.sequence'::regclass, …)` placed quoted identifiers inside a string literal without
+  escaping single quotes, so a sequence or schema whose name contained `'` produced broken or
+  injectable SQL. Non-integer `MAX()` values are now refused rather than guessed at.
+- **Appending to `known_hosts` could destroy an existing entry.** A file not ending in a newline —
+  common after hand-editing — had the new host key spliced onto its last line, corrupting both that
+  host's key and the new one. A separator is now added when needed.
+- **A host key of an unrecorded type was reported as a man-in-the-middle attack.** When
+  `known_hosts` held only an `ssh-rsa` entry and the server negotiated `ssh-ed25519`, the mismatch
+  path fired with attack wording. It is still refused — it genuinely cannot be verified — but the
+  message now says which types are on file and how to record the missing one. Crying wolf here
+  trains people to ignore the warning that matters; a *same-type* key change still reports as an
+  attack.
+- **`sslmode=prefer` and `sslmode=allow` could not connect to a server without TLS.** Both mean
+  "encrypt if possible", but handing node-postgres an `ssl` object demands TLS, so these failed
+  where DBeaver and `psql` succeed. They now fall back to plaintext, and only when the server itself
+  reports no TLS support. `require` and the `verify-*` modes never fall back.
+- `TRUNCATE`'s warning claimed it was "not recoverable by rollback". In PostgreSQL `TRUNCATE` is
+  transactional; the real hazards are the `ACCESS EXCLUSIVE` lock and the skipped per-row triggers.
+
+### Changed
+
+- Test suite grows from 67 to 94.
+
 ## [1.6.1] - 2026-09-26
 
 ### Changed

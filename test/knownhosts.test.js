@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHmac, randomBytes } from 'node:crypto'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import {
   POLICY_INSECURE,
@@ -12,6 +15,7 @@ import {
   lookupHostKey,
   matchHostPattern,
   parseKnownHosts,
+  rememberHostKey,
 } from '../src/knownhosts.js'
 
 /** Minimal SSH host key blob: uint32 length + type + payload. */
@@ -143,6 +147,85 @@ describe('host key decisions', () => {
     })
     assert.equal(d.ok, true)
     assert.match(d.warning, /NOT verified/)
+  })
+})
+
+describe('host key of an unrecorded type', () => {
+  const entries = (text) => parseKnownHosts(text)
+  const RSA = blob('ssh-rsa', 'rsa-key')
+
+  it('is refused, but not reported as an attack', () => {
+    // known_hosts has only ed25519; the server negotiated rsa. Unverifiable,
+    // but calling this a man-in-the-middle teaches people to ignore the real one.
+    const d = decideHostKey({
+      entries: entries(`db.example.com ssh-ed25519 ${b64(KEY)}`),
+      host: 'db.example.com',
+      port: 22,
+      keyBlob: RSA,
+      policy: POLICY_STRICT,
+    })
+    assert.equal(d.ok, false)
+    assert.doesNotMatch(d.reason, /man-in-the-middle/)
+    assert.match(d.reason, /ssh-rsa/)
+    assert.match(d.reason, /ssh-keyscan -t ssh-rsa/)
+  })
+
+  it('still reports a same-type key change as an attack', () => {
+    const d = decideHostKey({
+      entries: entries(`db.example.com ssh-ed25519 ${b64(KEY)}`),
+      host: 'db.example.com',
+      port: 22,
+      keyBlob: OTHER,
+      policy: POLICY_STRICT,
+    })
+    assert.equal(d.ok, false)
+    assert.match(d.reason, /man-in-the-middle/)
+  })
+
+  it('matches the recorded key when the type does line up', () => {
+    const d = decideHostKey({
+      entries: entries(
+        `db.example.com ssh-ed25519 ${b64(KEY)}\ndb.example.com ssh-rsa ${b64(RSA)}`
+      ),
+      host: 'db.example.com',
+      port: 22,
+      keyBlob: RSA,
+      policy: POLICY_STRICT,
+    })
+    assert.equal(d.ok, true)
+  })
+})
+
+describe('rememberHostKey', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'dbmcp-kh-'))
+
+  it('does not splice onto a file with no trailing newline', () => {
+    // Hand-edited known_hosts files often lack one. Appending blind destroyed
+    // both the previous host's entry and the new one in a single write.
+    const target = join(dir(), 'known_hosts')
+    writeFileSync(target, 'other.example.com ssh-ed25519 AAAAsomekey')
+    rememberHostKey('db.example.com', 22, KEY, [target])
+
+    const lines = readFileSync(target, 'utf8').split('\n').filter(Boolean)
+    assert.equal(lines.length, 2)
+    assert.equal(lines[0], 'other.example.com ssh-ed25519 AAAAsomekey')
+    assert.match(lines[1], /^db\.example\.com ssh-ed25519 /)
+    // The entry must be parseable, which is the thing splicing broke.
+    assert.equal(parseKnownHosts(readFileSync(target, 'utf8')).length, 2)
+  })
+
+  it('does not add a blank line when the file already ends in one', () => {
+    const target = join(dir(), 'known_hosts')
+    writeFileSync(target, 'other.example.com ssh-ed25519 AAAAsomekey\n')
+    rememberHostKey('db.example.com', 22, KEY, [target])
+    assert.equal(readFileSync(target, 'utf8').includes('\n\n'), false)
+    assert.equal(parseKnownHosts(readFileSync(target, 'utf8')).length, 2)
+  })
+
+  it('creates the file when absent, and uses the bracket form for odd ports', () => {
+    const target = join(dir(), 'known_hosts')
+    rememberHostKey('db.example.com', 2222, KEY, [target])
+    assert.match(readFileSync(target, 'utf8'), /^\[db\.example\.com\]:2222 ssh-ed25519 /)
   })
 })
 

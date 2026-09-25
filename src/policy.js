@@ -104,22 +104,38 @@ export function toolEnabled(policy, name) {
 /* ------------------------------------------------- destructive statements */
 
 const DROP_DATABASE = /^\s*drop\s+(database|tablespace)\b/i
-const DROP_OBJECT = /^\s*drop\s+(table|schema|role|user|index|view|materialized\s+view)\b/i
+const DROP_OBJECT =
+  /^\s*drop\s+(table|schema|role|user|index|view|materialized\s+view|sequence|function|procedure|routine|aggregate|trigger|type|domain|extension|policy|publication|subscription|foreign\s+table|server|rule|operator|cast|owned)\b/i
 const TRUNCATE = /^\s*truncate\b/i
 const ALTER_SYSTEM = /^\s*alter\s+system\b/i
 const DELETE_FROM = /^\s*delete\s+from\b/i
 const UPDATE_SET = /^\s*update\b/i
+/** `ALTER TABLE … DROP COLUMN` destroys a column's data as surely as DROP TABLE. */
+const ALTER_TABLE_DROP = /^\s*alter\s+table\b[\s\S]*\bdrop\s+(column|constraint)\b/i
+const CASCADE = /\bcascade\b/i
 
 /**
- * Strip string and dollar-quoted literals so a `WHERE` inside a value cannot
- * be mistaken for a real predicate.
+ * Blank out literals *and quoted identifiers* so a keyword inside either cannot
+ * be read as syntax. Quoted identifiers matter: a column literally named
+ * `"where"` would otherwise satisfy the `\bwhere\b` test and let an
+ * unrestricted `UPDATE` past the no-WHERE check.
  */
 function stripLiterals(sql) {
   return String(sql)
     .replace(/\$([A-Za-z0-9_]*)\$[\s\S]*?\$\1\$/g, "''")
     .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""')
     .replace(/--[^\n]*/g, ' ')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
+}
+
+/** Readable phrase for a dropped object kind. */
+function dropPhrase(what) {
+  const kind = what.toLowerCase().replace(/\s+/g, ' ')
+  if (kind === 'owned') return 'drops every object owned by a role'
+  if (kind === 'index') return 'drops an index'
+  if (kind === 'extension') return 'drops an extension and everything depending on it'
+  return `drops a ${kind}`
 }
 
 /**
@@ -132,11 +148,20 @@ export function describeDestructive(sql) {
   if (!bare) return null
 
   if (DROP_DATABASE.test(bare)) return 'drops an entire database or tablespace'
-  if (TRUNCATE.test(bare)) return 'truncates a table (not logged, not recoverable by rollback of DML)'
+  if (TRUNCATE.test(bare)) {
+    // Postgres TRUNCATE *is* transactional, so the old wording ("not recoverable
+    // by rollback") was wrong. What actually bites is the lock and the skipped
+    // triggers.
+    return 'truncates a table — every row at once, an ACCESS EXCLUSIVE lock, and no per-row triggers'
+  }
   if (ALTER_SYSTEM.test(bare)) return 'changes server-wide configuration'
   if (DROP_OBJECT.test(bare)) {
-    const what = bare.match(DROP_OBJECT)[1].toLowerCase()
-    return `drops a ${what}`
+    const phrase = dropPhrase(bare.match(DROP_OBJECT)[1])
+    return CASCADE.test(bare) ? `${phrase}, and CASCADE extends that to everything depending on it` : phrase
+  }
+  if (ALTER_TABLE_DROP.test(bare)) {
+    const what = bare.match(ALTER_TABLE_DROP)[1].toLowerCase()
+    return `drops a ${what} from a table, discarding its data`
   }
   if (DELETE_FROM.test(bare) && !/\bwhere\b/i.test(bare)) {
     return 'deletes every row in the table (no WHERE clause)'

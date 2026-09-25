@@ -148,10 +148,22 @@ export function rememberHostKey(host, port, keyBlob, paths = knownHostsPaths()) 
   if (!target) return null
   const names = hostNameForms(host, port)
   const keyType = keyTypeFromBlob(keyBlob) || 'ssh-unknown'
-  const line = `${names[0]} ${keyType} ${Buffer.from(keyBlob).toString('base64')}\n`
+  const entry = `${names[0]} ${keyType} ${Buffer.from(keyBlob).toString('base64')}\n`
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
-  appendFileSync(target, line, { mode: 0o600 })
+  // A known_hosts file that does not end in a newline is common enough when it
+  // has been hand-edited. Appending blind would splice our entry onto the end of
+  // the previous line, destroying that host's key and ours in one write.
+  appendFileSync(target, needsLeadingNewline(target) ? `\n${entry}` : entry, { mode: 0o600 })
   return target
+}
+
+function needsLeadingNewline(path) {
+  try {
+    const buf = readFileSync(path)
+    return buf.length > 0 && buf[buf.length - 1] !== 0x0a
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -183,15 +195,37 @@ export function decideHostKey({ entries, host, port, keyBlob, policy = POLICY_ST
     }
   }
 
-  if (found.hostFound && found.keys.length > 0) {
+  // A *different key of the same type* is the alarming case. A key of a type we
+  // have no entry for is usually just algorithm negotiation picking ed25519 when
+  // known_hosts only ever recorded rsa — still unverifiable, but reporting it as
+  // an attack trains people to ignore the warning that matters.
+  const presentedType = keyTypeFromBlob(keyBlob)
+  const sameType = presentedType
+    ? found.keys.filter((k) => k.keyType === presentedType)
+    : found.keys
+
+  if (found.hostFound && sameType.length > 0) {
     return {
       ok: false,
       reason:
         `SSH host key mismatch for ${host}:${port}.\n` +
         `  presented: ${fp}\n` +
-        `  known_hosts has a different key for this host.\n` +
+        `  known_hosts has a different ${presentedType || 'host'} key for this host.\n` +
         'This is what a man-in-the-middle attack looks like. If you genuinely rotated the host key, ' +
         `remove the old entry (ssh-keygen -R ${names[0]}) and reconnect.`,
+    }
+  }
+
+  if (found.hostFound && found.keys.length > 0 && policy !== POLICY_TOFU) {
+    const known = [...new Set(found.keys.map((k) => k.keyType))].join(', ')
+    return {
+      ok: false,
+      reason:
+        `No ${presentedType || 'matching'} host key recorded for ${host}:${port} (presented ${fp}).\n` +
+        `  known_hosts has this host with: ${known}\n` +
+        'The server negotiated a key type you have never recorded, so it cannot be verified. This is ' +
+        'usually not an attack — record the missing type:\n' +
+        `  ssh-keyscan -t ${presentedType || 'rsa,ecdsa,ed25519'} -p ${port || 22} ${host} >> ~/.ssh/known_hosts`,
     }
   }
 

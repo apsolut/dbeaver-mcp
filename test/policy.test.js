@@ -85,6 +85,37 @@ describe('destructive statement detection', () => {
     assert.match(describeDestructive('UPDATE users SET active = false'), /every row/)
   })
 
+  it('flags the object kinds beyond TABLE that also lose data', () => {
+    assert.match(describeDestructive('DROP SEQUENCE users_id_seq'), /drops a sequence/)
+    assert.match(describeDestructive('DROP FUNCTION f(int)'), /drops a function/)
+    assert.match(describeDestructive('DROP TRIGGER t ON users'), /drops a trigger/)
+    assert.match(describeDestructive('DROP TYPE mood'), /drops a type/)
+    assert.match(describeDestructive('DROP EXTENSION postgis'), /extension/)
+    assert.match(describeDestructive('DROP PUBLICATION p'), /drops a publication/)
+    assert.match(describeDestructive('DROP OWNED BY someone'), /owned by a role/)
+  })
+
+  it('flags ALTER TABLE … DROP COLUMN, which discards that column entirely', () => {
+    assert.match(describeDestructive('ALTER TABLE users DROP COLUMN email'), /drops a column/)
+    assert.match(describeDestructive('ALTER TABLE users DROP CONSTRAINT users_pkey'), /drops a constraint/)
+    // Adding a column is not destructive.
+    assert.equal(describeDestructive('ALTER TABLE users ADD COLUMN email text'), null)
+  })
+
+  it('calls out CASCADE, which widens the blast radius', () => {
+    assert.match(describeDestructive('DROP TABLE users CASCADE'), /CASCADE/)
+    assert.doesNotMatch(describeDestructive('DROP TABLE users'), /CASCADE/)
+  })
+
+  it('is not fooled by a quoted identifier named "where"', () => {
+    // A column literally called "where" used to satisfy the \bwhere\b test and
+    // let an unrestricted UPDATE through as non-destructive.
+    assert.match(describeDestructive('UPDATE users SET "where" = 1'), /every row/)
+    assert.match(describeDestructive('DELETE FROM "where"'), /every row/)
+    // A real predicate on such a column is still bounded.
+    assert.equal(describeDestructive('UPDATE users SET a = 1 WHERE "where" = 2'), null)
+  })
+
   it('allows bounded DELETE and UPDATE', () => {
     assert.equal(describeDestructive('DELETE FROM users WHERE id = 1'), null)
     assert.equal(describeDestructive('UPDATE users SET a = 1 WHERE id = 2'), null)

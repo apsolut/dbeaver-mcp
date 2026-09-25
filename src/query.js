@@ -8,6 +8,45 @@ const WRITE_HEAD =
   /^(insert|update|delete|alter|drop|create|truncate|grant|revoke|comment|vacuum|reindex|copy|call|do|refresh|merge|lock)\b/i
 const WRITE_FUNCS = /\b(setval|nextval)\s*\(/i
 const WITH_MUTATION = /^with\b[\s\S]*\b(insert|update|delete|merge)\b/i
+
+/**
+ * Statements that would take transaction control away from this server.
+ *
+ * The read-only promise is the engine's — `BEGIN TRANSACTION READ ONLY` — and
+ * that is exactly why these have to be refused. A leading `COMMIT` *ends* the
+ * read-only transaction, so every statement after it runs unprotected: a
+ * `SELECT` calling a volatile function that writes is not caught by
+ * `statementIsWrite`, and would then succeed. `SET TRANSACTION READ WRITE` is
+ * accepted by Postgres before the first query of a transaction and defeats it
+ * just as directly.
+ *
+ * Refused on write paths too: `run_script` promises a single transaction, and a
+ * mid-batch `COMMIT` silently makes the earlier half non-rollbackable.
+ */
+const TX_CONTROL =
+  /^(begin|start\s+transaction|commit|end|rollback|abort|savepoint|release\b|prepare\s+transaction|commit\s+prepared|rollback\s+prepared|set\s+transaction|set\s+session\s+characteristics|set\s+constraints|discard)\b/i
+
+/**
+ * Settings that exist to protect the caller. Letting SQL clear them is not a
+ * feature: `SET statement_timeout = 0` removes the runaway-query guard, and
+ * `SET ROLE` / `SET SESSION AUTHORIZATION` change who the connection is.
+ */
+const GUARD_SETTINGS =
+  /^(set|reset)\s+(session\s+|local\s+)?(statement_timeout|lock_timeout|idle_in_transaction_session_timeout|default_transaction_read_only|transaction_read_only|session_replication_role|role|session_authorization|authorization|all)\b/i
+
+/**
+ * Objects that hand out credentials or read the server's filesystem.
+ *
+ * `pg_authid` holds every role's SCRAM verifier and `pg_read_file` reads
+ * arbitrary server files — both are plain reads, so a read-only transaction
+ * permits them happily. They are superuser-only, which is the mitigation, but
+ * "the agent asked for the password hashes and got them" is not a defensible
+ * outcome when the connection happens to be privileged.
+ *
+ * Set DBEAVER_MCP_ALLOW_SENSITIVE_READS=true if you genuinely need these.
+ */
+const SENSITIVE_OBJECTS =
+  /\b(pg_authid|pg_shadow|pg_user_mappings|pg_read_file|pg_read_binary_file|pg_stat_file|pg_ls_dir|pg_ls_logdir|pg_ls_waldir|pg_ls_tmpdir|pg_ls_archive_statusdir)\b/i
 /** Statements Postgres refuses to run inside a transaction block. */
 const NO_TRANSACTION =
   /^(vacuum|analyze\s|create\s+database|drop\s+database|create\s+tablespace|drop\s+tablespace|alter\s+system|cluster\b|reindex\s+(database|system)|(create|drop|reindex)\s+index\s+concurrently|create\s+index\s+concurrently|alter\s+type\s+\S+\s+add\s+value)/i
@@ -171,8 +210,60 @@ export function statementBlocksTransaction(sql) {
   return NO_TRANSACTION.test(stripLeadingComments(sql))
 }
 
+/**
+ * True if the statement would seize transaction control or disarm a guard.
+ * Checked on every path, reads and writes alike — this server owns its own
+ * transactions and its own timeouts.
+ */
+export function statementHijacksSession(sql) {
+  const s = stripLeadingComments(sql)
+  if (!s) return false
+  return TX_CONTROL.test(s) || GUARD_SETTINGS.test(s)
+}
+
+export function sensitiveReadsAllowed(env = process.env) {
+  return ['true', '1', 'yes', 'on'].includes(
+    String(env.DBEAVER_MCP_ALLOW_SENSITIVE_READS ?? '').trim().toLowerCase()
+  )
+}
+
+/** Names a credential store or a server-side file reader, or null. */
+export function describeSensitiveRead(sql) {
+  const m = SENSITIVE_OBJECTS.exec(stripQuoted(sql))
+  return m ? m[1].toLowerCase() : null
+}
+
 export function quoteIdent(name) {
   return `"${String(name).replace(/"/g, '""')}"`
+}
+
+/** Escape for a single-quoted SQL string literal. */
+export function quoteLiteral(value) {
+  return `'${String(value).replace(/'/g, "''")}'`
+}
+
+/**
+ * Exact integer from Postgres text, or null.
+ * Sequence values are bigint, so they arrive as text precisely to avoid the
+ * rounding that Number() would reintroduce.
+ */
+export function toBigIntOrNull(value) {
+  if (value === null || value === undefined) return null
+  const s = String(value).trim()
+  return /^-?\d+$/.test(s) ? BigInt(s) : null
+}
+
+/**
+ * Blank out string, dollar-quoted and double-quoted spans so a keyword sitting
+ * inside a value or a quoted identifier cannot be read as syntax.
+ */
+export function stripQuoted(sql) {
+  return String(sql ?? '')
+    .replace(/\$([A-Za-z0-9_]*)\$[\s\S]*?\$\1\$/g, "''")
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""')
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
 }
 
 /* ------------------------------------------------------------------ TLS */
@@ -359,12 +450,36 @@ async function withClient(conn, statementTimeoutMs, fn) {
   }
 
   const cfg = await connectTarget(conn, { statementTimeoutMs })
-  const client = new pg.Client(cfg)
-  await client.connect()
+  const client = await connectWithOptionalTls(conn, cfg)
   try {
     return await fn(client)
   } finally {
     await client.end().catch(() => {})
+  }
+}
+
+/**
+ * `allow` and `prefer` mean "encrypt if the server can". node-postgres has no
+ * such negotiation — handing it an `ssl` object demands TLS — so a `prefer`
+ * connection against a server without TLS failed here while DBeaver and psql
+ * connected fine.
+ *
+ * The retry is deliberately narrow: only for the two optional modes, and only
+ * when the server itself says it has no TLS. `require` and the `verify-*` modes
+ * never fall back, because there the encryption was the point.
+ */
+async function connectWithOptionalTls(conn, cfg) {
+  const client = new pg.Client(cfg)
+  try {
+    await client.connect()
+    return client
+  } catch (err) {
+    const optional = ['allow', 'prefer'].includes(String(conn?.sslMode || '').toLowerCase())
+    if (!cfg.ssl || !optional || !/does not support SSL/i.test(err?.message || '')) throw err
+    await client.end().catch(() => {})
+    const plain = new pg.Client({ ...cfg, ssl: undefined })
+    await plain.connect()
+    return plain
   }
 }
 
@@ -386,6 +501,29 @@ export async function runQuery(
   if (statements.length === 0) throw new Error('No SQL statements to run')
   if (params && statements.length > 1) {
     throw new Error('Bound parameters require exactly one statement')
+  }
+
+  const hijack = statements.find(statementHijacksSession)
+  if (hijack) {
+    throw new Error(
+      `Refusing "${hijack.slice(0, 60)}": this server manages its own transactions and timeouts. ` +
+        'A COMMIT or ROLLBACK here would end the transaction the safety guarantees depend on, and ' +
+        'leave every following statement running outside it. Send the statements without transaction ' +
+        'control and use the transaction option instead.'
+    )
+  }
+
+  if (!sensitiveReadsAllowed()) {
+    for (const statement of statements) {
+      const object = describeSensitiveRead(statement)
+      if (object) {
+        throw new Error(
+          `Refusing to read ${object}: it exposes credential material or the server's filesystem. ` +
+            'A read-only transaction does not stop this, so it is blocked here. Set ' +
+            'DBEAVER_MCP_ALLOW_SENSITIVE_READS=true if you genuinely need it.'
+        )
+      }
+    }
   }
 
   const writes = statements.filter(statementIsWrite)
@@ -475,6 +613,18 @@ export async function explainQuery(conn, sql, { analyze = false, verbose = false
       'EXPLAIN ANALYZE executes the statement. Refusing to run it on a write. Use analyze: false for the plan alone.'
     )
   }
+  if (statementHijacksSession(statement)) {
+    throw new Error('Refusing to explain a transaction-control or session-setting statement.')
+  }
+  if (!sensitiveReadsAllowed()) {
+    const object = describeSensitiveRead(statement)
+    if (object) {
+      throw new Error(
+        `Refusing to explain a statement that reads ${object}. With analyze: true it would execute. ` +
+          'Set DBEAVER_MCP_ALLOW_SENSITIVE_READS=true if you genuinely need it.'
+      )
+    }
+  }
 
   const opts = ['FORMAT JSON']
   if (analyze) opts.push('ANALYZE', 'BUFFERS')
@@ -506,16 +656,28 @@ export async function fixSequences(conn, { schema, table, dryRun = true } = {}) 
   const report = await inspectSequences(conn, { schema, table })
   const behind = report.rows.filter((r) => r.needs_reset)
 
-  const plan = behind.map((r) => ({
-    sequence: `${r.schema}.${r.sequence}`,
-    table: `${r.schema}.${r.table}`,
-    column: r.column,
-    from: r.last_value,
-    to: r.max_value,
-    sql: `SELECT setval('${quoteIdent(r.schema)}.${quoteIdent(r.sequence)}'::regclass, ${Number(
-      r.max_value
-    )}, true)`,
-  }))
+  const plan = behind.map((r) => {
+    // The target must be interpolated as exact digits. Number() would round
+    // anything past 2^53, and setval to a rounded value reintroduces exactly
+    // the duplicate-key failures this tool exists to fix.
+    const target = toBigIntOrNull(r.max_value)
+    if (target === null) {
+      throw new Error(
+        `Sequence ${r.schema}.${r.sequence}: MAX(${r.column}) is "${r.max_value}", which is not an integer. Refusing to guess a setval target.`
+      )
+    }
+    // The regclass argument is a string literal, so the identifier quoting goes
+    // inside it and the whole thing still needs literal escaping.
+    const ref = quoteLiteral(`${quoteIdent(r.schema)}.${quoteIdent(r.sequence)}`)
+    return {
+      sequence: `${r.schema}.${r.sequence}`,
+      table: `${r.schema}.${r.table}`,
+      column: r.column,
+      from: r.last_value,
+      to: r.max_value,
+      sql: `SELECT setval(${ref}::regclass, ${target}, true)`,
+    }
+  })
 
   if (dryRun || plan.length === 0) {
     return { schema: report.schema, dryRun: true, wouldFix: plan.length, plan, applied: [] }
@@ -574,9 +736,11 @@ export async function inspectSequences(conn, { schema, table } = {}) {
         )}.${quoteIdent(row.table)}`
         const maxRes = await client.query(maxSql)
         const maxValue = maxRes.rows[0]?.max_value ?? null
-        const last = row.last_value == null ? null : Number(row.last_value)
-        const max = maxValue == null ? null : Number(maxValue)
-        const needsReset = max != null && Number.isFinite(max) && (last == null || last < max)
+        // Compared as BigInt: these are bigint columns, and Number() rounds
+        // past 2^53, which can make a sequence that is behind look fine.
+        const last = toBigIntOrNull(row.last_value)
+        const max = toBigIntOrNull(maxValue)
+        const needsReset = max !== null && (last === null || last < max)
         rows.push({
           schema: row.schema,
           table: row.table,

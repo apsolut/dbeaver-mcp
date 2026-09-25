@@ -172,11 +172,26 @@ the wrong database.
 
 `execute_query` refuses writes, including `SELECT setval(...)`. Use `write_query` or `run_script` for those.
 
-**Destructive SQL needs `confirm: true`** — `DROP`, `TRUNCATE`, `ALTER SYSTEM`, and `DELETE` /
-`UPDATE` with no `WHERE`. The check runs per statement on the parsed batch, with string literals
-stripped, so neither a `;`-separated batch nor a `WHERE` inside a value slips past. It's a
-confirmation rather than a refusal on purpose: a flat block just teaches an agent to rephrase
-until it gets through.
+**Destructive SQL needs `confirm: true`** — `DROP` of any object, `TRUNCATE`, `ALTER SYSTEM`,
+`ALTER TABLE … DROP COLUMN`, and `DELETE` / `UPDATE` with no `WHERE`. The check runs per statement
+on the parsed batch, with string literals *and quoted identifiers* stripped, so neither a
+`;`-separated batch, nor a `WHERE` inside a value, nor a column named `"where"` slips past.
+`CASCADE` is called out separately, because it widens the blast radius. It's a confirmation rather
+than a refusal on purpose: a flat block just teaches an agent to rephrase until it gets through.
+
+**Transaction control is refused, everywhere.** `COMMIT`, `ROLLBACK`, `BEGIN`, `SAVEPOINT`,
+`SET TRANSACTION`, `SET ROLE`, `SET statement_timeout` and friends are rejected on reads and writes
+alike. This is not tidiness. Reads run inside `BEGIN TRANSACTION READ ONLY`, so a leading `COMMIT`
+would end that transaction and leave every following statement running unprotected — including a
+`SELECT` that calls a volatile function which writes. Use the `transaction` option instead; the
+server owns its own transactions and timeouts.
+
+**Credential stores and server-side file readers are blocked.** `pg_authid` and `pg_shadow` hold
+password verifiers; `pg_read_file`, `pg_ls_dir` and `pg_stat_file` read the database server's
+filesystem. All are plain reads, so a read-only transaction permits them happily — being
+superuser-only is the only thing standing in the way, and that is not enough when the connection
+*is* privileged. Set `DBEAVER_MCP_ALLOW_SENSITIVE_READS=true` if you genuinely need them. The
+strongest mitigation remains connecting as a least-privilege role rather than `postgres`.
 
 ## Restricting what the agent can reach
 
@@ -237,6 +252,13 @@ fails, it is almost certainly one of these — and in each case the older behavi
 | `sslmode` is honoured properly | TLS errors on `verify-ca` / `verify-full` connections | Previously every mode skipped certificate checks. Point `DBEAVER_MCP_SSL_ROOT_CERT` at your CA, or set the connection to `require` in DBeaver if you genuinely do not want verification. |
 | Writes need an exact connection name | `Writes require an exact name or id` | Use the full name or id from `list_connections`. Partial matching could previously select the wrong database. |
 
+1.7 adds two more refusals, both closing real holes:
+
+| Change | You will see | What to do |
+|--------|--------------|------------|
+| Transaction control is refused | `this server manages its own transactions` | Drop the `BEGIN` / `COMMIT` / `ROLLBACK` from the SQL and use the `transaction` option. A leading `COMMIT` used to end the read-only transaction and leave the rest of the batch unprotected. |
+| Credential tables and file readers are refused | `Refusing to read pg_authid` | Nothing, normally. If you really need them, `DBEAVER_MCP_ALLOW_SENSITIVE_READS=true` — better, connect as a least-privilege role instead of `postgres`. |
+
 Also new: queries time out after 30s by default (`timeoutMs`, or
 `DBEAVER_MCP_STATEMENT_TIMEOUT_MS`), and large results are capped by total bytes — watch for
 `truncatedBytes: true`.
@@ -271,6 +293,7 @@ Also new: queries time out after 30s by default (`timeoutMs`, or
 | `DBEAVER_MCP_ALLOWED_CONNECTIONS` | all | Comma-separated names/ids, `*`/`?` wildcards |
 | `DBEAVER_MCP_WRITABLE_CONNECTIONS` | = allowed | Narrower list that may be written to |
 | `DBEAVER_MCP_DISABLED_TOOLS` | none | Tool names to remove from the surface |
+| `DBEAVER_MCP_ALLOW_SENSITIVE_READS` | `false` | `true` permits `pg_authid`, `pg_shadow`, `pg_read_file` and friends |
 
 ## Contributing
 
