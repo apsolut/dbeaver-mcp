@@ -1,17 +1,19 @@
-# TODO — before this goes public
+# TODO — post-release
 
-Status as of 2026-09-26, v1.6.0. The **code** is in good shape: 67 tests, every security control
-verified end-to-end against a live SSH-tunnelled Postgres 15. Everything below is release
-logistics and open decisions, not engineering debt.
+Status as of 2026-09-26, **v1.6.1, released**. Public at `github.com/apsolut/dbeaver-mcp`, on npm
+as `@apsolut/dbeaver-mcp`, CI green on six jobs, 67 tests, 0 Dependabot alerts. Every security
+control verified end-to-end against a live SSH-tunnelled Postgres 15 — on Windows only.
 
-Distribution is **clone-only, GitHub, no npm** (D4). D1 is closed with no rename.
+Distribution is **both**: npm for the package, clone + `npm run setup` for agent registration.
+`npx` alone does not register the plugin with any host.
 
-> Note: this file is excluded from the npm tarball (`files` in `package.json`) but **will** be
-> visible on GitHub. Keep it free of hostnames, credentials and customer names.
+> Note: this file is excluded from the npm tarball (`files` in `package.json`) but **is** visible on
+> GitHub. Keep it free of hostnames, credentials and customer names. This bit it once already —
+> v1.6.0 shipped a real connection name in the examples and in the `execute_query` tool schema.
 
 ---
 
-## 1. Blockers — the repo cannot go public until these are done
+## 1. Release — done
 
 - [x] **Commit the work.** Landed on `release/1.6.0`; tree clean.
 - [x] **`README.md` placeholder.** `git clone <this-repo>` replaced with the real clone URL, plus a
@@ -21,10 +23,14 @@ Distribution is **clone-only, GitHub, no npm** (D4). D1 is closed with no rename
 - [x] **Dependabot.** The push surfaced 9 advisories (4 high). Fixed in `dfe309d`, lockfile only;
       0 open alerts.
 
-No blockers remain. What is left in §3 is quality, not permission.
+- [x] **npm.** Published as `@apsolut/dbeaver-mcp@1.6.1`, public access confirmed. The unscoped
+      name belongs to someone else, hence the scope.
+- [x] **Tagged** `v1.6.1`.
+- [x] **1.6.0 deprecated** on npm. It shipped a real connection name, a `npm test` that could not
+      run on Windows + Node 20, and 9 dependency advisories. Deprecated rather than unpublished so
+      existing lockfiles still resolve. The 72-hour unpublish window closes ~22:54Z 2026-09-28.
 
-The npm blockers are **closed, not done** — see D4. Distribution is clone-only, so the 403 on the
-taken name, the `npm whoami` 401, the `@apsolut` scope and `publishConfig` no longer apply.
+No blockers remain. What is left in §3 is quality, not permission.
 
 ## 2. Decisions to make
 
@@ -71,20 +77,19 @@ server with no indication.
 
 ### D4 — Distribution model *(decided 2026-09-26)*
 
-- [x] **GitHub first**, install via `git clone` + `npm run setup`.
-- [ ] **npm as `@apsolut/dbeaver-mcp`** — agreed in principle, deliberately *after* the quality
-      gates in §3. Publish only once CI is green on all three OSes and at least one real
-      macOS/Linux tunnel query has succeeded. `npx` sets an expectation that untested platforms
-      cannot meet, and npm versions cannot meaningfully be unpublished after 72 hours.
+- [x] **GitHub**, install via `git clone` + `npm run setup`.
+- [x] **npm as `@apsolut/dbeaver-mcp`** — shipped 1.6.1. Two edits, not a rename pass:
+      `package.json:2` plus `"publishConfig": { "access": "public" }`, because scoped packages
+      default to restricted and the first publish would otherwise have created a private package.
+      **`bin` stayed `dbeaver-mcp` and all four plugin manifests are untouched** — npm and the host
+      plugin namespaces are unrelated, so none of the `install-hosts.mjs:211` migration applied.
 
-When that happens the change is two edits, not a rename pass: `package.json:2` →
-`@apsolut/dbeaver-mcp`, plus `"publishConfig": { "access": "public" }` because scoped packages
-default to restricted. **`bin` stays `dbeaver-mcp` and all four plugin manifests stay unchanged** —
-npm and the host plugin namespaces are unrelated, so none of the `install-hosts.mjs:211` migration
-applies.
+Published ahead of the §3 macOS/Linux gate, knowingly. The consequence to watch: `npx` reaches
+platforms where no real query has ever run, and the README platform table is the only thing
+setting expectations. Treat the first macOS or Linux issue as expected, not surprising.
 
-Until then `npx dbeaver-mcp` resolves to `lucascborges/dbeaver-mcp`, which is why `README.md`
-warns about it.
+`npx dbeaver-mcp` — unscoped — is `lucascborges/dbeaver-mcp`, a different server. The scope is
+load-bearing and `README.md` says so.
 
 ### D5 — Scope of the project
 

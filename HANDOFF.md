@@ -1,7 +1,12 @@
 # HANDOFF — dbeaver-mcp, updated 2026-09-26
 
-State: **v1.6.0 on `main` at `567ecee`**, public at `github.com/apsolut/dbeaver-mcp`, CI green on
-all six jobs, 67 tests passing, 0 Dependabot alerts. Not on npm — that is deliberate, see TODO §D4.
+State: **v1.6.1 released.** Public at `github.com/apsolut/dbeaver-mcp`, tagged `v1.6.1`, on npm as
+`@apsolut/dbeaver-mcp`. CI green on all six jobs, 67 tests passing, 0 Dependabot alerts.
+
+`1.6.0` is published-and-deprecated: it shipped a real connection name in the examples and the
+`execute_query` tool schema, a `npm test` that could not run on Windows + Node 20, and 9 dependency
+advisories. Use 1.6.1. The name also remains in git history before `ef13028` — a deliberate
+decision, and harmless to npm, which never sees the repository.
 
 For *what to do next*, read **[TODO.md](./TODO.md)** — it holds the blockers and the open
 decisions. This file is context: what was done, what was actually verified, and what to be
