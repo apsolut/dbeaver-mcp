@@ -25,7 +25,7 @@ one is rejected rather than guessed. `write_query` and `run_script` require the 
 
 ```
 execute_query
-  name: PSN LIVE
+  name: ACME LIVE
   query: |
     SELECT id, name FROM regions ORDER BY id;
     SELECT id, name FROM cities ORDER BY id;
@@ -58,7 +58,7 @@ Use this for “insert lookup row, then attach listings”.
 
 ```
 run_script
-  name: PSN LIVE
+  name: ACME LIVE
   transaction: true
   statements:
     - INSERT INTO regions (name, code, …) SELECT … WHERE NOT EXISTS (…)
@@ -80,7 +80,7 @@ Postgres sequences do not catch up when you insert explicit ids. The next `INSER
 
 ```
 inspect_sequences
-  name: PSN LIVE
+  name: ACME LIVE
   schema: public          # optional
   table: pages            # optional — one table
 ```
@@ -100,7 +100,7 @@ nothing:
 
 ```
 fix_sequences
-  name: PSN LIVE
+  name: ACME LIVE
 ```
 
 Then apply. This is a **write**, so it needs the exact connection name and runs every `setval` in
@@ -108,7 +108,7 @@ one transaction:
 
 ```
 fix_sequences
-  name: PSN LIVE
+  name: ACME LIVE
   apply: true
 ```
 
@@ -116,7 +116,7 @@ Or do a single one by hand:
 
 ```
 write_query
-  name: PSN LIVE
+  name: ACME LIVE
   query: SELECT setval('pages_id_seq', (SELECT MAX(id) FROM pages), true)
 ```
 
@@ -187,10 +187,10 @@ The plugin uses the SSH user/password/key **from DBeaver**. It does not read `~/
 
 ```bash
 npm run cli -- list
-npm run cli -- test "PSN LIVE"
-npm run cli -- query "PSN LIVE" "SELECT 1; SELECT current_user"
-npm run cli -- sequences "PSN LIVE"
-npm run cli -- sequences "PSN LIVE" public pages
+npm run cli -- test "ACME LIVE"
+npm run cli -- query "ACME LIVE" "SELECT 1; SELECT current_user"
+npm run cli -- sequences "ACME LIVE"
+npm run cli -- sequences "ACME LIVE" public pages
 ```
 
 `query` uses the same splitter as the MCP tools. Writes are allowed on the CLI — you typed them.

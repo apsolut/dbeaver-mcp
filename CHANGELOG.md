@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-09-26
+
+### Changed
+- Examples use the placeholder connection name `ACME LIVE` / `ACME STAGING`. Earlier versions
+  shipped a real connection name in `README.md`, `HOWTO.md` and in the `execute_query` tool
+  schema. No credentials were ever involved — the name alone was the concern.
+- `npm test` no longer depends on shell glob expansion, so the suite runs on Windows with
+  Node 20. It previously passed `test/*.test.js`, which PowerShell does not expand and Node 20
+  does not expand internally.
+- Dependency updates closing 9 advisories: `fast-uri` (4 high, SSRF and host confusion), `hono`
+  and `qs`. All transitive and on the HTTP layer; none on the credential or tunnel path.
+
+### Note
+- `1.6.0` was published to npm and unpublished the same day for the reason above. Use `1.6.1`.
+
 ## [1.6.0] - 2026-09-24
 
 ### Security

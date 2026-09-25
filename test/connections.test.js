@@ -3,15 +3,15 @@ import { describe, it } from 'node:test'
 import { findConnection, isPostgresDriver, resolveConnection } from '../src/dbeaver.js'
 
 const list = [
-  { id: 'pg-1', name: 'PSN LIVE', supported: true },
-  { id: 'pg-2', name: 'PSN LIVE STAGING', supported: true },
+  { id: 'pg-1', name: 'ACME LIVE', supported: true },
+  { id: 'pg-2', name: 'ACME STAGING', supported: true },
   { id: 'pg-3', name: 'billing', supported: true },
 ]
 
 describe('resolveConnection', () => {
   it('matches by id and by exact name', () => {
     assert.equal(resolveConnection(list, 'pg-3').name, 'billing')
-    assert.equal(resolveConnection(list, 'psn live').id, 'pg-1')
+    assert.equal(resolveConnection(list, 'acme live').id, 'pg-1')
   })
 
   it('allows an unambiguous substring for reads', () => {
@@ -19,7 +19,7 @@ describe('resolveConnection', () => {
   })
 
   it('refuses an ambiguous substring instead of guessing', () => {
-    assert.throws(() => resolveConnection(list, 'PSN'), /ambiguous/i)
+    assert.throws(() => resolveConnection(list, 'ACME'), /ambiguous/i)
   })
 
   it('refuses any substring when fuzzy matching is off', () => {
@@ -41,7 +41,7 @@ describe('resolveConnection', () => {
 
   it('findConnection returns null for misses but still throws on ambiguity', () => {
     assert.equal(findConnection(list, 'nope'), null)
-    assert.throws(() => findConnection(list, 'PSN'), /ambiguous/i)
+    assert.throws(() => findConnection(list, 'ACME'), /ambiguous/i)
   })
 })
 

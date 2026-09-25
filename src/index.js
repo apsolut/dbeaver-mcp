@@ -163,7 +163,7 @@ function createServer() {
     'execute_query',
     'Run read-only SQL inside a READ ONLY transaction. Multiple SELECTs return every result set (not only the last). SSH tunnels open automatically.',
     {
-      name: z.string().describe('Connection name or id, e.g. "PSN LIVE"'),
+      name: z.string().describe('Connection name or id, e.g. "ACME LIVE"'),
       query: z.string().describe('SELECT / WITH / EXPLAIN / SHOW. Multiple statements allowed.'),
       maxRows: z
         .number()

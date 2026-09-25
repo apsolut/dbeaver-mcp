@@ -91,7 +91,7 @@ up, that protection does not come with it.
 ## One loose end outside the repo
 
 `~/.grok/mcp/dbeaver-ssh/` is the pre-rewrite plugin directory. Its registrations have been
-removed, but it still contains `dump-psn-live.mjs`, which never made it into this repo. Rescue it
+removed, but it still contains a one-off dump script that never made it into this repo. Rescue it
 or accept losing it before deleting that folder.
 
 ## Quick orientation

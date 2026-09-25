@@ -130,7 +130,7 @@ Currently Postgres-wire only, deliberately. omnisql-mcp covers PostgreSQL/MySQL/
 - [ ] **Decide whether the pre-commit hook should travel.** `.git/hooks/pre-commit` blocks
       `.apsolut/` from ever being staged, but `.git/hooks/` is not cloned. Making it shared means a
       tracked file plus `core.hooksPath`.
-- [ ] `~/.grok/mcp/dbeaver-ssh/` still holds `dump-psn-live.mjs`, which never made it into this
+- [ ] `~/.grok/mcp/dbeaver-ssh/` still holds a one-off dump script that never made it into this
       repo. Rescue it or accept losing it before deleting that folder.
 
 ---

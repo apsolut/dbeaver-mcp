@@ -145,11 +145,11 @@ The first start (and the first write of a session) prints a **BACKUP FIRST YOUR 
 
 Then:
 
-> test the connection named PSN LIVE  
-> select id, name from regions limit 5 on PSN LIVE
+> test the connection named ACME LIVE  
+> select id, name from regions limit 5 on ACME LIVE
 
 The `name` argument is the DBeaver connection name or its id. **Reads** also accept a unique
-substring (`live` → `PSN LIVE`); an ambiguous substring is an error, never a guess. **Writes**
+substring (`live` → `ACME LIVE`); an ambiguous substring is an error, never a guess. **Writes**
 (`write_query`, `run_script`) require the exact name or id, so a partial match can never land on
 the wrong database.
 
@@ -202,10 +202,10 @@ confirm it exists.
 
 ```bash
 npm run cli -- list
-npm run cli -- test "PSN LIVE"
-npm run cli -- query "PSN LIVE" "SELECT 1; SELECT current_database()"
-npm run cli -- sequences "PSN LIVE"
-npm run cli -- sequences "PSN LIVE" public pages
+npm run cli -- test "ACME LIVE"
+npm run cli -- query "ACME LIVE" "SELECT 1; SELECT current_database()"
+npm run cli -- sequences "ACME LIVE"
+npm run cli -- sequences "ACME LIVE" public pages
 ```
 
 ## 7. One agent only
