@@ -16,10 +16,12 @@ Distribution is **clone-only, GitHub, no npm** (D4). D1 is closed with no rename
 - [x] **Commit the work.** Landed on `release/1.6.0`; tree clean.
 - [x] **`README.md` placeholder.** `git clone <this-repo>` replaced with the real clone URL, plus a
       note that `npx dbeaver-mcp` fetches an unrelated project.
-- [ ] **No git remote.** `git remote -v` is empty. Create `apsolut/dbeaver-mcp` on GitHub and add
-      it. This is now the only hard blocker.
-- [ ] **Fast-forward `main`.** Still at `98ad6cb`, the 1.4-era banner commit.
-      `git checkout main && git merge --ff-only release/1.6.0`.
+- [x] **Git remote.** `apsolut/dbeaver-mcp` is public; `main` and `release/1.6.0` both pushed.
+- [x] **Fast-forward `main`.** Done — `main` is at `567ecee`, and is the default branch.
+- [x] **Dependabot.** The push surfaced 9 advisories (4 high). Fixed in `dfe309d`, lockfile only;
+      0 open alerts.
+
+No blockers remain. What is left in §3 is quality, not permission.
 
 The npm blockers are **closed, not done** — see D4. Distribution is clone-only, so the 403 on the
 taken name, the `npm whoami` 401, the `@apsolut` scope and `publishConfig` no longer apply.
@@ -94,10 +96,14 @@ Currently Postgres-wire only, deliberately. omnisql-mcp covers PostgreSQL/MySQL/
 
 ## 3. Quality gates — do before the first tag, not after
 
-- [ ] **Run CI.** `.github/workflows/ci.yml` exists (ubuntu + macOS + windows × Node 20/22) but has
-      **never executed** — there is no remote to run it on. Must be green before tagging.
-- [ ] **macOS / Linux end-to-end.** Implemented and unit-tested; nobody has run a real query on
-      either. `README.md` states this plainly and invites PRs.
+- [x] **Run CI.** Green on all six jobs (ubuntu + macOS + windows × Node 20/22) as of 2026-09-26.
+      Its first run earned its keep: `npm test` passed the glob `test/*.test.js`, which PowerShell
+      does not expand, so the suite had never been runnable on Windows + Node 20. Fixed in
+      `567ecee` with bare `node --test`.
+- [ ] **macOS / Linux end-to-end.** The unit suite now genuinely passes on both — that is new — but
+      nobody has run a **real query against a real database** on either, and the tests need no
+      database. This gate is *not* closed by green CI. It is the last one standing before npm.
+      `README.md` states this plainly and invites PRs.
 - [ ] **`scripts/install-hosts.mjs` on a non-Windows box.** It writes agent configs and creates
       symlinks. It backs up and refuses to delete non-links, but the `mklink`-vs-`symlink` branch
       has only ever run on Windows.

@@ -1,7 +1,7 @@
-# HANDOFF — dbeaver-mcp, 2026-09-24
+# HANDOFF — dbeaver-mcp, updated 2026-09-26
 
-State at handoff: **v1.6.0 on branch `release/1.6.0`**, working tree clean, 67 tests passing.
-Nothing is published and there is no git remote yet.
+State: **v1.6.0 on `main` at `567ecee`**, public at `github.com/apsolut/dbeaver-mcp`, CI green on
+all six jobs, 67 tests passing, 0 Dependabot alerts. Not on npm — that is deliberate, see TODO §D4.
 
 For *what to do next*, read **[TODO.md](./TODO.md)** — it holds the blockers and the open
 decisions. This file is context: what was done, what was actually verified, and what to be
@@ -46,10 +46,12 @@ Be precise about this — the README makes a public claim about it.
 
 **Not verified, at all:**
 
-- **macOS and Linux.** Implemented and unit-tested; nobody has run a real query on either. The
-  installer's `mklink`-vs-`symlink` branch has only ever run on Windows.
-- **CI.** `.github/workflows/ci.yml` exists and covers all three OSes, but has **never executed** —
-  there is no remote to run it on. Do not mistake a committed workflow for a passing one.
+- **macOS and Linux, against a real database.** The unit suite now passes on both in CI, but the
+  tests need no database, so this says nothing about a real query. The installer's
+  `mklink`-vs-`symlink` branch has still only ever run on Windows.
+- ~~CI~~ — as of 2026-09-26 it has run and is **green on all six jobs**. Its first execution found
+  that `npm test` used a glob PowerShell will not expand, so the suite had never worked on
+  Windows + Node 20 despite `package.json` claiming Node 20 support.
 - Connection pooling and stateful transactions — deliberately not built, see TODO.md §4.
 
 ## Things that will bite you
