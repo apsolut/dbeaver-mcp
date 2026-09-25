@@ -54,15 +54,17 @@ Be precise about this — the README makes a public claim about it.
 
 ## Things that will bite you
 
-1. **The npm name `dbeaver-mcp` is taken** by an unrelated v3.0.0. `npm publish` returns 403.
-   Decision D1 in TODO.md; the recommendation is `@apsolut/dbeaver-mcp`.
-2. **`README.md` still says `git clone <this-repo>`** — a placeholder, sitting above a section
-   inviting PRs. Fix it the moment the repo exists.
-3. **Renaming the plugin needs a migration step.** `scripts/install-hosts.mjs:211` dedupes on the
-   old name; change the name without adding the old one to that list and a re-run appends a
-   *second* marketplace entry. The old-named links in `~/.codex/plugins/`, `~/.grok/plugins/` and
-   `~/.gemini/config/plugins/` also need removing, or every host shows the plugin twice.
-   `linkDir` will not do this — it only manages the path it is handed.
+1. ~~The npm name is taken~~ — moot as of 2026-09-26. Distribution is clone-only (D4), so
+   `npm publish` is never called. The holder is `lucascborges/dbeaver-mcp`: MySQL only, no SSH
+   tunnels, 1 star. `npx dbeaver-mcp` gets *their* server, which the README now warns about.
+2. ~~`README.md` placeholder~~ — fixed; real clone URL in place.
+3. **Renaming the plugin still needs a migration step**, if it ever happens.
+   `scripts/install-hosts.mjs:211` dedupes on the old name; change the name without adding the old
+   one to that list and a re-run appends a *second* marketplace entry. The old-named links in
+   `~/.codex/plugins/`, `~/.grok/plugins/` and `~/.gemini/config/plugins/` also need removing, or
+   every host shows the plugin twice. `linkDir` will not do this — it only manages the path it is
+   handed. Names were left unchanged deliberately; the accepted risk is a flat-namespace collision
+   if a user installs a second DBeaver MCP plugin.
 4. **Three breaking changes** from 1.4 will look like bugs to an existing user: tunnels to unknown
    hosts now fail, `verify-ca`/`verify-full` connections may now legitimately fail, and writes need
    an exact connection name. All three are in the CHANGELOG and in README's "Upgrading from 1.4".

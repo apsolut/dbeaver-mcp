@@ -39,12 +39,15 @@ to paste into an issue.
 ## 1. Install on this PC
 
 ```bash
-git clone <this-repo> dbeaver-mcp
+git clone https://github.com/apsolut/dbeaver-mcp.git
 cd dbeaver-mcp
 npm run setup
 ```
 
 `setup` installs dependencies and points every agent it can find at **this checkout**.
+
+This is distributed by clone only — it is **not on npm**. The npm package `dbeaver-mcp` is an
+unrelated project, so `npx dbeaver-mcp` will get you someone else's server.
 
 Restart Grok / Claude / Codex / Agy.
 

@@ -1,55 +1,56 @@
 # TODO — before this goes public
 
-Status as of 2026-09-24, v1.6.0. The **code** is in good shape: 67 tests, every security control
+Status as of 2026-09-26, v1.6.0. The **code** is in good shape: 67 tests, every security control
 verified end-to-end against a live SSH-tunnelled Postgres 15. Everything below is release
 logistics and open decisions, not engineering debt.
+
+Distribution is **clone-only, GitHub, no npm** (D4). D1 is closed with no rename.
 
 > Note: this file is excluded from the npm tarball (`files` in `package.json`) but **will** be
 > visible on GitHub. Keep it free of hostnames, credentials and customer names.
 
 ---
 
-## 1. Blockers — publishing is impossible until these are done
+## 1. Blockers — the repo cannot go public until these are done
 
-- [ ] **Commit the work.** `v1.5.0` *and* `v1.6.0` exist only in the working tree. `HEAD` is still
-      `98ad6cb`, the 1.4-era banner commit. This is the single highest-risk item on the page: one
-      bad `git clean` and the entire hardening pass and feature pass are gone.
-- [ ] **The npm name `dbeaver-mcp` is taken** (v3.0.0, "MCP server exposing DBeaver connections to
-      Claude"). `npm publish` returns 403 as things stand. See decision D1.
-- [ ] **No git remote.** `git remote -v` is empty. Create the GitHub repo and add it.
-- [ ] **`README.md` still says `git clone <this-repo>`** — a literal placeholder, sitting directly
-      above a section inviting people to send PRs.
-- [ ] **Not logged in to npm** (`npm whoami` → 401), and the `@apsolut` scope must exist under the
-      account or org before a scoped publish will work.
-- [ ] **Scoped packages publish as restricted by default.** Needs
-      `"publishConfig": { "access": "public" }` or the first publish silently creates a private
-      package.
+- [x] **Commit the work.** Landed on `release/1.6.0`; tree clean.
+- [x] **`README.md` placeholder.** `git clone <this-repo>` replaced with the real clone URL, plus a
+      note that `npx dbeaver-mcp` fetches an unrelated project.
+- [ ] **No git remote.** `git remote -v` is empty. Create `apsolut/dbeaver-mcp` on GitHub and add
+      it. This is now the only hard blocker.
+- [ ] **Fast-forward `main`.** Still at `98ad6cb`, the 1.4-era banner commit.
+      `git checkout main && git merge --ff-only release/1.6.0`.
+
+The npm blockers are **closed, not done** — see D4. Distribution is clone-only, so the 403 on the
+taken name, the `npm whoami` 401, the `@apsolut` scope and `publishConfig` no longer apply.
 
 ## 2. Decisions to make
 
-### D1 — Package identity *(recommendation: scope it)*
+### D1 — Package identity *(decided 2026-09-26: no rename)*
 
-`dbeaver-mcp` is taken; there are at least five DBeaver MCP packages on npm. Everyone who solved
-this used an npm scope (`@iflow-mcp/…`, `@leonyuu/…`, `@mhdd_24/…`), not a flat prefix.
+Resolved by D4. The rename existed only to escape the npm 403; with clone-only distribution there
+is nothing to escape. GitHub namespaces by owner, so `apsolut/dbeaver-mcp` does not collide with
+`lucascborges/dbeaver-mcp` — and `package.json:36-43` already points `repository`, `bugs` and
+`homepage` at the right place.
 
-| Surface | Proposed | Note |
-|---|---|---|
-| npm package | `@apsolut/dbeaver-mcp` | scope is free; scopes are the actual namespace mechanism |
-| `bin` | `dbeaver-mcp` | unchanged; only collides if two are installed globally |
-| Plugin manifests | `apsolut-dbeaver-mcp` | Grok/Codex/Agy namespaces are flat, so a prefix is the only option |
-| GitHub repo | `apsolut/dbeaver-mcp` | GitHub already namespaces by owner — no prefix needed |
-| Folder on disk | unchanged | nothing depends on it once `npm run setup` re-runs |
+Names left deliberately unchanged: `package.json:2`, `plugin.json:2`,
+`.claude-plugin/plugin.json:2`, `.codex-plugin/plugin.json:2`, `.grok-plugin/marketplace.json:2`
+and `:7`. `private` stays `false`.
 
-`mcp-dbeaver` was considered and rejected: it's free but solves nothing long-term, and it abandons
-the `<tool>-mcp` convention that makes the package findable under "dbeaver".
+**The one accepted risk:** Grok/Codex/Agy plugin namespaces are flat, so a user who installs a
+second DBeaver MCP plugin gets a name collision. Judged narrow enough to accept rather than pay
+for the installer migration. If that ever changes, the migration is not optional:
+`scripts/install-hosts.mjs:211` dedupes on the plugin name, so renaming without adding the old
+name to that list appends a **second** marketplace entry, and the old-named links in
+`~/.codex/plugins/`, `~/.grok/plugins/` and `~/.gemini/config/plugins/` must be removed by hand —
+`linkDir` only manages the path it is given.
 
-- [ ] Decide, then apply to: `package.json:2`, `plugin.json:2`, `.claude-plugin/plugin.json:2`,
-      `.codex-plugin/plugin.json:2`, `.grok-plugin/marketplace.json:2` and `:7`.
-- [ ] **Installer migration** — `scripts/install-hosts.mjs:211` dedupes on the old name. If the
-      plugin name changes, add the old name to that list or a re-run appends a **second**
-      marketplace entry instead of replacing the first. Also remove the old-named links at
-      `~/.codex/plugins/`, `~/.grok/plugins/`, `~/.gemini/config/plugins/` or every host shows the
-      plugin twice. `linkDir` will not do this for you — it only manages the path it is given.
+### Who holds the npm name
+
+`lucascborges/dbeaver-mcp` — MySQL only, no SSH tunnels, 1 star, 16 commits. Read-only by
+statement blocking rather than engine enforcement. Convergent on the read/write split and
+per-connection permissions; no overlap on the tunnel path. Not a competitor worth tracking, but it
+is why `npx dbeaver-mcp` is a trap and why the README now says so.
 
 ### D2 — The `mcpServers` key
 
@@ -61,20 +62,27 @@ server with no indication.
 - [ ] **Or rename to `apsolut-dbeaver`** — collision-proof, but every tool name grows and
       `AGENTS.md`, `HOWTO.md`, `README.md` and `skills/dbeaver/SKILL.md` all need updating.
 
-### D3 — Is `PLAN.md` public?
+### D3 — Is `PLAN.md` public? *(decided 2026-09-26: yes)*
 
-It's excluded from the npm tarball but would be visible on GitHub. It is a detailed account of
-twelve security weaknesses this project used to have.
+- [x] **Published.** No vulnerable version was ever released, so disclosing the twelve findings
+      exposes nobody. It stands as the record of the hardening work.
 
-- [ ] Publish it — honest, and a genuinely good record of the hardening work. No practical
-      exposure, since no vulnerable version was ever released.
-- [ ] Or move it into `.apsolut/03-plan/` and keep it local.
+### D4 — Distribution model *(decided 2026-09-26)*
 
-### D4 — Distribution model
+- [x] **GitHub first**, install via `git clone` + `npm run setup`.
+- [ ] **npm as `@apsolut/dbeaver-mcp`** — agreed in principle, deliberately *after* the quality
+      gates in §3. Publish only once CI is green on all three OSes and at least one real
+      macOS/Linux tunnel query has succeeded. `npx` sets an expectation that untested platforms
+      cannot meet, and npm versions cannot meaningfully be unpublished after 72 hours.
 
-- [ ] npm publish (needs D1), so `npx @apsolut/dbeaver-mcp` works
-- [ ] GitHub-only, install via `git clone` + `npm run setup` *(status quo)*
-- [ ] Both
+When that happens the change is two edits, not a rename pass: `package.json:2` →
+`@apsolut/dbeaver-mcp`, plus `"publishConfig": { "access": "public" }` because scoped packages
+default to restricted. **`bin` stays `dbeaver-mcp` and all four plugin manifests stay unchanged** —
+npm and the host plugin namespaces are unrelated, so none of the `install-hosts.mjs:211` migration
+applies.
+
+Until then `npx dbeaver-mcp` resolves to `lucascborges/dbeaver-mcp`, which is why `README.md`
+warns about it.
 
 ### D5 — Scope of the project
 
