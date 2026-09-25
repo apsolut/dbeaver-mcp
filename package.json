@@ -13,7 +13,7 @@
     "doctor": "node scripts/doctor.mjs",
     "setup": "npm install && node scripts/install-hosts.mjs",
     "install-hosts": "node scripts/install-hosts.mjs",
-    "test": "node --test test/*.test.js"
+    "test": "node --test"
   },
   "files": [
     "src/",
