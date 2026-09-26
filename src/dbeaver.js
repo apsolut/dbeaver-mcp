@@ -132,6 +132,40 @@ function sshFromConfig(configuration) {
   }
 }
 
+/**
+ * Reduce whatever is in the host field to an actual hostname.
+ *
+ * DBeaver will store exactly what was typed, and pasting a connection URL into
+ * the Host box is an easy mistake — Supabase in particular hands you a URL. A
+ * hostname can never contain `://`, a path or credentials, so stripping them is
+ * unambiguous, and it turns an opaque `ENOTFOUND https://host/` into a
+ * connection that works. A port found on the way out is offered to the caller,
+ * which uses it only when nothing more explicit is configured.
+ */
+export function normalizeHost(raw) {
+  let h = String(raw ?? '').trim()
+  if (!h) return { host: 'localhost', port: null }
+
+  h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // scheme
+  h = h.replace(/^[^/@]*@/, '') // user:pass@
+  h = h.replace(/[/?#].*$/, '') // path, query, fragment
+
+  let port = null
+  const bracketed = h.match(/^\[([^\]]+)\](?::(\d+))?$/) // IPv6
+  if (bracketed) {
+    h = bracketed[1]
+    port = bracketed[2] ? Number(bracketed[2]) : null
+  } else {
+    const withPort = h.match(/^([^:]+):(\d+)$/)
+    if (withPort) {
+      h = withPort[1]
+      port = Number(withPort[2])
+    }
+  }
+
+  return { host: h || 'localhost', port }
+}
+
 /** Does this DBeaver driver speak the Postgres wire protocol? */
 export function isPostgresDriver(raw) {
   const hay = `${raw?.provider || ''} ${raw?.driver || ''}`
@@ -246,8 +280,9 @@ export function loadConnectionsDetailed(workspace = defaultWorkspace()) {
     const secrets = credsFor(creds, id)
     const ssl = sslConfigFor(cfg, fromUrl)
     const ssh = sshFromConfig(cfg)
-    const host = cfg.host || fromUrl.host || 'localhost'
-    const port = Number(cfg.port || fromUrl.port || 5432)
+    const located = normalizeHost(cfg.host || fromUrl.host || 'localhost')
+    const host = located.host
+    const port = Number(cfg.port || fromUrl.port || located.port || 5432)
     const database = cfg.database || cfg.bootstrap?.defaultCatalog || fromUrl.database || 'postgres'
     const user = secrets.user || fromUrl.user || cfg.user || null
     const password = secrets.password || fromUrl.password || null

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { findConnection, isPostgresDriver, resolveConnection } from '../src/dbeaver.js'
+import {
+  findConnection,
+  isPostgresDriver,
+  normalizeHost,
+  resolveConnection,
+} from '../src/dbeaver.js'
 
 const list = [
   { id: 'pg-1', name: 'ACME LIVE', supported: true },
@@ -56,5 +61,38 @@ describe('isPostgresDriver', () => {
     assert.equal(isPostgresDriver({ provider: 'mysql', driver: 'mysql8' }), false)
     assert.equal(isPostgresDriver({ provider: 'sqlite', driver: 'sqlite_jdbc' }), false)
     assert.equal(isPostgresDriver({}), false)
+  })
+})
+
+describe('normalizeHost', () => {
+  it('reduces a pasted URL to a hostname', () => {
+    // Real case: Supabase hands you a URL, and DBeaver stores exactly what was
+    // typed into the Host box. The result was an opaque ENOTFOUND.
+    assert.deepEqual(normalizeHost('https://abc.supabase.co'), {
+      host: 'abc.supabase.co',
+      port: null,
+    })
+    assert.deepEqual(normalizeHost('postgres://db.example.com:6543/postgres'), {
+      host: 'db.example.com',
+      port: 6543,
+    })
+  })
+
+  it('strips embedded credentials and paths', () => {
+    assert.equal(normalizeHost('user:secret@db.example.com').host, 'db.example.com')
+    assert.equal(normalizeHost('db.example.com/postgres?sslmode=require').host, 'db.example.com')
+  })
+
+  it('leaves an ordinary host alone', () => {
+    assert.deepEqual(normalizeHost('db.example.com'), { host: 'db.example.com', port: null })
+    assert.deepEqual(normalizeHost('localhost'), { host: 'localhost', port: null })
+    assert.deepEqual(normalizeHost('10.0.0.5'), { host: '10.0.0.5', port: null })
+  })
+
+  it('handles IPv6 and empty input', () => {
+    assert.deepEqual(normalizeHost('[::1]:5433'), { host: '::1', port: 5433 })
+    assert.deepEqual(normalizeHost('[2001:db8::1]'), { host: '2001:db8::1', port: null })
+    assert.deepEqual(normalizeHost(''), { host: 'localhost', port: null })
+    assert.deepEqual(normalizeHost(null), { host: 'localhost', port: null })
   })
 })

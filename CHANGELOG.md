@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-09-26
+
+### Fixed
+
+- **A connection URL pasted into DBeaver's Host box produced an unusable host.** DBeaver stores
+  exactly what was typed, and Supabase hands you a URL, so the host field could hold
+  `https://ref.supabase.co` — which then failed as an opaque `ENOTFOUND https://…`. Scheme,
+  embedded credentials and any path are now stripped, and a port found along the way is used only
+  when nothing more explicit is configured. IPv6 literals in brackets are handled.
+  Found in a real workspace, not in a test.
+
+### Verified
+
+- Live on PostgreSQL 17.7: `SHOW transaction_read_only` returns `on` inside `execute_query`, and
+  the 1.7.0 read-only bypass was confirmed to be real before the fix — `COMMIT` and
+  `SET TRANSACTION READ WRITE` each flipped it to `off` mid-session. Both are now refused.
+- Live through an SSH tunnel: host key verification, port forward, and read-only enforcement.
+- `pg_authid` and `pg_read_file` confirmed reachable inside a read-only transaction on a superuser
+  connection, which is what the new refusals exist to stop.
+- Still not verified anywhere: macOS and Linux against a real database.
+
 ## [1.7.0] - 2026-09-26
 
 ### Security
